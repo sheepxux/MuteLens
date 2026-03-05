@@ -4,8 +4,8 @@ import React, { useState } from "react";
 import { Check, Copy, Code, FileText, ExternalLink, Shield } from "lucide-react";
 import { useLocale } from "@/lib/i18n/context";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const SITE_BASE = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3333";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+const SITE_BASE = process.env.NEXT_PUBLIC_SITE_URL || "";
 
 interface BadgeEmbedProps {
   badgeId: string;

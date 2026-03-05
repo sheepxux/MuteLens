@@ -15,7 +15,10 @@ from datetime import datetime, timezone
 from dataclasses import dataclass, asdict
 from typing import Optional
 
-DB_DIR = os.path.join(os.path.dirname(__file__), "data")
+if os.environ.get("VERCEL"):
+    DB_DIR = "/tmp"
+else:
+    DB_DIR = os.path.join(os.path.dirname(__file__), "data")
 DB_PATH = os.path.join(DB_DIR, "mutelens.db")
 
 _local = threading.local()

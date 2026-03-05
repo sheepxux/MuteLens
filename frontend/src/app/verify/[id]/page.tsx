@@ -22,7 +22,7 @@ const ShaderBackground = dynamic(
   { ssr: false }
 );
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 interface VerifyData {
   badge_id: string;

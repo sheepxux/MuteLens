@@ -22,7 +22,7 @@ from llm_evaluator import evaluate_article
 from badge_store import save_evaluation, get_evaluation
 from badge_svg import generate_badge_svg
 
-SITE_URL = os.getenv("SITE_URL", "http://localhost:3333")
+SITE_URL = os.getenv("SITE_URL", "https://mute-lens.vercel.app")
 
 app = FastAPI(
     title="Mutelens API",
