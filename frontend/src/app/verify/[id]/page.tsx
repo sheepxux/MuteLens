@@ -53,15 +53,7 @@ interface VerifyData {
   verify_url: string;
 }
 
-const GRADE_COLORS: Record<string, string> = {
-  S: "#D4AF37",
-  A: "#22c55e",
-  "B+": "#3b82f6",
-  B: "#06b6d4",
-  C: "#f59e0b",
-  D: "#ef4444",
-  F: "#6b7280",
-};
+const BRAND = "#fc6011";
 
 export default function VerifyPage({
   params,
@@ -85,7 +77,7 @@ export default function VerifyPage({
       .finally(() => setLoading(false));
   }, [id]);
 
-  const gradeColor = data ? GRADE_COLORS[data.grade] || "#6b7280" : "#6b7280";
+  const brandColor = BRAND;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -143,9 +135,9 @@ export default function VerifyPage({
         {data && (
           <div className="w-full max-w-2xl space-y-4 animate-fade-up">
             <div className="glass-panel rounded-3xl p-6 text-center space-y-4">
-              <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
-                <CheckCircle size={14} className="text-emerald-400" />
-                <span className="text-[12px] text-emerald-400 font-medium">
+              <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#fc6011]/10 border border-[#fc6011]/20">
+                <CheckCircle size={14} className="text-[#fc6011]" />
+                <span className="text-[12px] text-[#fc6011] font-medium">
                   {t("verify.authentic")}
                 </span>
               </div>
@@ -153,13 +145,13 @@ export default function VerifyPage({
               <div className="flex flex-col items-center gap-2">
                 <div
                   className="text-6xl font-bold"
-                  style={{ color: gradeColor }}
+                  style={{ color: brandColor }}
                 >
                   {Math.round(data.overall_score)}
                 </div>
                 <div
                   className="text-lg font-semibold"
-                  style={{ color: gradeColor }}
+                  style={{ color: brandColor }}
                 >
                   {data.grade}
                 </div>
@@ -249,7 +241,7 @@ export default function VerifyPage({
                         </span>
                         <span
                           className="text-[12px] font-mono font-semibold"
-                          style={{ color: gradeColor }}
+                          style={{ color: brandColor }}
                         >
                           {d.score}/{d.maxScore}
                         </span>
@@ -259,7 +251,7 @@ export default function VerifyPage({
                           className="h-full rounded-full transition-all duration-700"
                           style={{
                             width: `${pct}%`,
-                            backgroundColor: gradeColor,
+                            backgroundColor: brandColor,
                             opacity: 0.7,
                           }}
                         />
