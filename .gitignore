@@ -21,3 +21,4 @@ backend/data/
 # Node
 node_modules/
 .next/
+.vercel
