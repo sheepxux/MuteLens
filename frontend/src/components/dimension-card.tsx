@@ -2,20 +2,17 @@
 
 import React from "react";
 import {
-  BarChart3,
   Lightbulb,
-  Landmark,
-  Clock,
-  Wrench,
-  Target,
-  Radio,
+  Scale,
+  BarChart3,
+  Telescope,
   Microscope,
   ShieldCheck,
-  Scale,
   type LucideIcon,
 } from "lucide-react";
 import { DimensionScore } from "@/lib/types";
 import { getScoreColor } from "@/lib/utils";
+import { useLocale } from "@/lib/i18n/context";
 
 interface DimensionCardProps {
   dimension: DimensionScore;
@@ -23,16 +20,12 @@ interface DimensionCardProps {
 }
 
 const DIMENSION_ICONS: Record<string, LucideIcon> = {
-  d1: BarChart3,
-  d2: Lightbulb,
-  d3: Landmark,
-  d4: Clock,
-  d5: Wrench,
-  d6: Target,
-  d7: Radio,
-  d8: Microscope,
-  d9: ShieldCheck,
-  d10: Scale,
+  d1: Lightbulb,
+  d2: Scale,
+  d3: BarChart3,
+  d4: Telescope,
+  d5: Microscope,
+  d6: ShieldCheck,
 };
 
 export default function DimensionCard({
@@ -42,6 +35,10 @@ export default function DimensionCard({
   const color = getScoreColor(dimension.score);
   const percentage = (dimension.score / dimension.maxScore) * 100;
   const IconComponent = DIMENSION_ICONS[dimension.key] || BarChart3;
+  const weightPct = Math.round(dimension.weight * 100);
+  const { locale } = useLocale();
+
+  const label = locale === "en" ? dimension.labelEn : dimension.label;
 
   return (
     <div
@@ -54,8 +51,10 @@ export default function DimensionCard({
             <IconComponent size={13} className="text-[#fc6011]" />
           </div>
           <div>
-            <p className="text-[13px] font-medium text-white leading-tight">{dimension.label}</p>
-            <p className="text-[10px] text-white/30 font-mono leading-tight mt-0.5">{dimension.labelEn}</p>
+            <p className="text-[13px] font-medium text-white leading-tight">{label}</p>
+            <p className="text-[10px] text-white/30 font-mono leading-tight mt-0.5">
+              {weightPct}%
+            </p>
           </div>
         </div>
         <div className="text-right flex-shrink-0">

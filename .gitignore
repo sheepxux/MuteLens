@@ -13,6 +13,7 @@ env/
 # 数据文件（体积大，含隐私）
 *.csv
 *.json.bak
+backend/data/
 
 # macOS
 .DS_Store

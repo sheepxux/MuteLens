@@ -1,8 +1,12 @@
 """
-ArticleRadar - Article Fetcher
+Mutelens - Article Fetcher v3.0
 ================================
 从 URL 提取文章标题、正文、发布时间、域名等元数据。
-优先使用 trafilatura，降级到 BeautifulSoup。
+
+提取策略（按优先级）：
+  1. 本地提取: trafilatura → BeautifulSoup → __NEXT_DATA__/JSON-LD
+  2. Jina Reader API: 免费、支持 JS 渲染、突破大多数反爬
+  3. 所有方法失败后，返回有意义的错误信息
 """
 
 import json
@@ -18,6 +22,7 @@ from bs4 import BeautifulSoup
 
 
 REQUEST_TIMEOUT = 20
+JINA_TIMEOUT = 30
 DEFAULT_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -32,6 +37,8 @@ BROWSER_HEADERS = {
     "Upgrade-Insecure-Requests": "1",
     "Cache-Control": "no-cache",
 }
+
+MIN_WORD_COUNT = 80
 
 
 def _make_session() -> requests.Session:
@@ -66,12 +73,10 @@ class ArticleData:
 
 # ─── 域名 → 来源类型 & 层级映射 ─────────────────────────────────────────────
 DOMAIN_TYPE_MAP: dict[str, tuple[str, str]] = {
-    # 学术
     "arxiv.org": ("research", "high"),
     "nature.com": ("research", "high"),
     "science.org": ("research", "high"),
     "proceedings.neurips.cc": ("research", "high"),
-    # 官方产品博客
     "openai.com": ("tech_news", "high"),
     "anthropic.com": ("tech_news", "high"),
     "deepmind.com": ("tech_news", "high"),
@@ -79,7 +84,6 @@ DOMAIN_TYPE_MAP: dict[str, tuple[str, str]] = {
     "ai.meta.com": ("tech_news", "high"),
     "huggingface.co": ("tech_news", "high"),
     "mistral.ai": ("tech_news", "high"),
-    # 顶级媒体
     "technologyreview.com": ("tech_news", "high"),
     "wired.com": ("tech_news", "high"),
     "arstechnica.com": ("tech_news", "high"),
@@ -87,12 +91,10 @@ DOMAIN_TYPE_MAP: dict[str, tuple[str, str]] = {
     "economist.com": ("business", "high"),
     "ft.com": ("business", "high"),
     "reuters.com": ("business", "high"),
-    # 科技媒体
     "techcrunch.com": ("tech_news", "medium"),
     "theverge.com": ("tech_news", "medium"),
     "scmp.com": ("business", "medium"),
     "restofworld.org": ("tech_news", "high"),
-    # Newsletter
     "newsletter.pragmaticengineer.com": ("newsletter", "high"),
     "ben-evans.com": ("newsletter", "high"),
     "interconnects.ai": ("newsletter", "high"),
@@ -101,21 +103,26 @@ DOMAIN_TYPE_MAP: dict[str, tuple[str, str]] = {
     "lastweekin.ai": ("newsletter", "high"),
     "sebastianraschka.com": ("newsletter", "high"),
     "substack.com": ("newsletter", "medium"),
-    # 中文
     "36kr.com": ("tech_news", "medium"),
     "infoq.cn": ("tech_news", "medium"),
     "sspai.com": ("tech_news", "high"),
     "ifanr.com": ("tech_news", "medium"),
     "jiqizhixin.com": ("tech_news", "high"),
-    # 社交
     "twitter.com": ("social_twitter", "medium"),
     "x.com": ("social_twitter", "medium"),
     "reddit.com": ("social_reddit", "medium"),
     "medium.com": ("medium", "medium"),
-    # 政策
     "gov.cn": ("government_policy", "high"),
     "miit.gov.cn": ("government_policy", "high"),
     "nist.gov": ("government_policy", "high"),
+}
+
+# 需要付费订阅的域名（提供更有意义的错误提示）
+PAYWALL_HINT: dict[str, str] = {
+    "wsj.com": "WSJ",
+    "bloomberg.com": "Bloomberg",
+    "ft.com": "Financial Times",
+    "economist.com": "The Economist",
 }
 
 
@@ -127,21 +134,17 @@ def _get_domain(url: str) -> str:
 
 
 def _detect_source_info(domain: str) -> tuple[str, str]:
-    """根据域名检测 source_type 和 source_tier。"""
     if domain in DOMAIN_TYPE_MAP:
         return DOMAIN_TYPE_MAP[domain]
-    # 尝试匹配子域名
     parts = domain.split(".")
     for i in range(len(parts)):
         parent = ".".join(parts[i:])
         if parent in DOMAIN_TYPE_MAP:
             return DOMAIN_TYPE_MAP[parent]
-    # 默认
     return ("tech_news", "medium")
 
 
 def _detect_language(text: str) -> str:
-    """简单语言检测：中文字符占比 > 20% 则为 zh，否则 en。"""
     if not text:
         return "en"
     chinese_chars = len(re.findall(r"[\u4e00-\u9fff]", text))
@@ -149,33 +152,13 @@ def _detect_language(text: str) -> str:
     return "zh" if ratio > 0.2 else "en"
 
 
-BLOCKED_DOMAINS = {
-    "medium.com": "Medium 对服务器端请求设有访问限制，建议改用其他来源的文章链接",
-    "bloomberg.com": "Bloomberg 需要订阅，无法提取文章内容",
-    "ft.com": "FT 需要订阅，无法提取文章内容",
-    "economist.com": "The Economist 需要订阅，无法提取文章内容",
-    "wsj.com": "WSJ 需要订阅，无法提取文章内容",
-    "openai.com": "OpenAI 网站对爬虫设有访问限制，无法提取文章内容",
-    "reuters.com": "Reuters 需要认证，无法提取文章内容",
-}
-
-
-def _check_blocked(domain: str) -> None:
-    if domain in BLOCKED_DOMAINS:
-        raise ValueError(BLOCKED_DOMAINS[domain])
-    for blocked in BLOCKED_DOMAINS:
-        if domain.endswith("." + blocked):
-            raise ValueError(BLOCKED_DOMAINS[blocked])
-
+# ─── 本地提取方法 ────────────────────────────────────────────────────────────
 
 def _fetch_html(url: str) -> str:
-    """使用浏览器 headers 获取 HTML，返回原始文本。"""
     session = _make_session()
     resp = session.get(url, timeout=REQUEST_TIMEOUT, allow_redirects=True)
     resp.raise_for_status()
-    # Decode bytes directly — do NOT rely on apparent_encoding which can truncate
     raw = resp.content
-    # Respect charset from Content-Type, fall back to chardet/utf-8
     ct = resp.headers.get("content-type", "")
     charset = None
     if "charset=" in ct:
@@ -189,7 +172,6 @@ def _fetch_html(url: str) -> str:
 
 
 def _extract_with_trafilatura(html: str) -> tuple[str, str, str, str, str]:
-    """用 trafilatura 从 HTML 提取 (title, content, published, author, cover_image)。"""
     meta_obj = trafilatura.metadata.extract_metadata(html)
     content = trafilatura.extract(
         html,
@@ -207,10 +189,8 @@ def _extract_with_trafilatura(html: str) -> tuple[str, str, str, str, str]:
 
 
 def _extract_with_bs4(html: str) -> tuple[str, str, str, str, str]:
-    """BeautifulSoup 降级提取，尽量找 <article> 主体。"""
     soup = BeautifulSoup(html, "html.parser")
 
-    # title
     title = ""
     for sel in [("meta", {"property": "og:title"}), ("meta", {"name": "twitter:title"})]:
         tag = soup.find(*sel)
@@ -221,7 +201,6 @@ def _extract_with_bs4(html: str) -> tuple[str, str, str, str, str]:
         t = soup.find("title")
         title = t.get_text(strip=True) if t else ""
 
-    # published
     published = ""
     for prop in ["article:published_time", "datePublished", "date", "article:modified_time"]:
         tag = soup.find("meta", property=prop) or soup.find("meta", attrs={"name": prop})
@@ -233,7 +212,6 @@ def _extract_with_bs4(html: str) -> tuple[str, str, str, str, str]:
         if tag:
             published = tag.get("datetime", tag.get_text(strip=True))
 
-    # author
     author = ""
     for prop in ["author", "article:author"]:
         tag = soup.find("meta", attrs={"name": prop}) or soup.find("meta", property=prop)
@@ -241,7 +219,6 @@ def _extract_with_bs4(html: str) -> tuple[str, str, str, str, str]:
             author = tag["content"].strip()
             break
 
-    # cover
     cover_image = ""
     for prop in ["og:image", "twitter:image"]:
         tag = soup.find("meta", property=prop) or soup.find("meta", attrs={"name": prop})
@@ -249,7 +226,6 @@ def _extract_with_bs4(html: str) -> tuple[str, str, str, str, str]:
             cover_image = tag["content"].strip()
             break
 
-    # content — prefer <article>, then <main>, then <body>
     for remove in soup.find_all(["script", "style", "nav", "header", "footer",
                                   "aside", "noscript", "iframe", "form"]):
         remove.decompose()
@@ -265,7 +241,6 @@ def _extract_with_bs4(html: str) -> tuple[str, str, str, str, str]:
 
 
 def _flatten(obj: object, depth: int = 0) -> str:
-    """递归地将嵌套 JSON 对象中的字符串拼接为纯文本。"""
     if depth > 8:
         return ""
     if isinstance(obj, str):
@@ -278,7 +253,6 @@ def _flatten(obj: object, depth: int = 0) -> str:
 
 
 def _deep_get(d: dict, *keys: str) -> object:
-    """安全地从嵌套字典中取值。"""
     cur = d
     for k in keys:
         if not isinstance(cur, dict):
@@ -288,17 +262,14 @@ def _deep_get(d: dict, *keys: str) -> object:
 
 
 def _extract_with_next_data(html: str) -> tuple[str, str, str, str, str]:
-    """从 __NEXT_DATA__ (Next.js) 或 JSON-LD 中提取文章内容。"""
     soup = BeautifulSoup(html, "html.parser")
 
-    # ── 1. __NEXT_DATA__ (Next.js SSR) ──────────────────────────────────────
     nd_tag = soup.find("script", {"id": "__NEXT_DATA__"})
     if nd_tag:
         try:
             data = json.loads(nd_tag.get_text())
             props = _deep_get(data, "props", "pageProps") or {}
 
-            # Try common key patterns across different Next.js sites
             article = None
             for key in ("article", "post", "data", "detail", "newsDetail",
                         "articleDetail", "content", "story"):
@@ -328,7 +299,6 @@ def _extract_with_next_data(html: str) -> tuple[str, str, str, str, str]:
                 if isinstance(cover_image, dict):
                     cover_image = cover_image.get("url", "")
 
-                # Content field — try multiple keys
                 raw_content = ""
                 for ck in ("content", "body", "description", "summary",
                            "articleContent", "htmlContent", "text"):
@@ -337,7 +307,6 @@ def _extract_with_next_data(html: str) -> tuple[str, str, str, str, str]:
                         break
 
                 if raw_content:
-                    # Strip HTML tags if content is HTML
                     content_str = str(raw_content)
                     if "<" in content_str:
                         content_soup = BeautifulSoup(content_str, "html.parser")
@@ -350,7 +319,6 @@ def _extract_with_next_data(html: str) -> tuple[str, str, str, str, str]:
         except (json.JSONDecodeError, AttributeError, TypeError):
             pass
 
-    # ── 2. JSON-LD (Schema.org Article) ─────────────────────────────────────
     for ld_tag in soup.find_all("script", {"type": "application/ld+json"}):
         try:
             data = json.loads(ld_tag.get_text())
@@ -386,30 +354,21 @@ def _extract_with_next_data(html: str) -> tuple[str, str, str, str, str]:
     return "", "", "", "", ""
 
 
-def fetch_article(url: str) -> ArticleData:
-    """从 URL 提取文章全部信息。"""
+def _try_local_extraction(url: str) -> ArticleData | None:
+    """尝试本地提取（trafilatura → BS4 → NEXT_DATA），失败返回 None。"""
     domain = _get_domain(url)
     source_type, source_tier = _detect_source_info(domain)
 
-    _check_blocked(domain)
-
-    # Always fetch HTML ourselves with browser headers
     try:
         html = _fetch_html(url)
-    except requests.HTTPError as e:
-        status = e.response.status_code if e.response is not None else "?"
-        raise ValueError(f"无法访问该页面（HTTP {status}），请检查链接是否有效")
-    except requests.exceptions.Timeout:
-        raise ValueError("请求超时，该网站响应过慢，请稍后重试")
-    except requests.exceptions.ConnectionError:
-        raise ValueError("无法连接到该网站，请检查链接或网络状态")
-    except Exception as e:
-        raise ValueError(f"无法获取页面内容: {e}")
+    except Exception:
+        return None
 
-    # Pass 1: trafilatura (best quality)
+    title, content, published, author, cover_image = "", "", "", "", ""
+
     try:
         title, content, published, author, cover_image = _extract_with_trafilatura(html)
-        if content and len(content.split()) >= 80:
+        if content and len(content.split()) >= MIN_WORD_COUNT:
             return ArticleData(
                 url=url, domain=domain, title=title, content=content,
                 published=published, author=author,
@@ -417,39 +376,146 @@ def fetch_article(url: str) -> ArticleData:
                 cover_image=cover_image, source_type=source_type, source_tier=source_tier,
             )
     except Exception:
-        title, content, published, author, cover_image = "", "", "", "", ""
+        pass
 
-    # Pass 2: BeautifulSoup fallback
     try:
-        title2, content2, published2, author2, cover2 = _extract_with_bs4(html)
-        title = title or title2
-        published = published or published2
-        author = author or author2
-        cover_image = cover_image or cover2
-        if len(content2.split()) > len(content.split()):
-            content = content2
+        t2, c2, p2, a2, img2 = _extract_with_bs4(html)
+        title = title or t2
+        published = published or p2
+        author = author or a2
+        cover_image = cover_image or img2
+        if len(c2.split()) > len(content.split()):
+            content = c2
     except Exception:
         pass
 
-    # Pass 3: __NEXT_DATA__ / JSON-LD (for Next.js SPAs with embedded data)
-    if not content or len(content.split()) < 80:
+    if not content or len(content.split()) < MIN_WORD_COUNT:
         try:
-            title3, content3, published3, author3, cover3 = _extract_with_next_data(html)
-            title = title or title3
-            published = published or published3
-            author = author or author3
-            cover_image = cover_image or cover3
-            if len(content3.split()) > len(content.split()):
-                content = content3
+            t3, c3, p3, a3, img3 = _extract_with_next_data(html)
+            title = title or t3
+            published = published or p3
+            author = author or a3
+            cover_image = cover_image or img3
+            if len(c3.split()) > len(content.split()):
+                content = c3
         except Exception:
             pass
 
+    if content and len(content.split()) >= 50:
+        return ArticleData(
+            url=url, domain=domain, title=title, content=content[:15000],
+            published=published, author=author,
+            word_count=len(content.split()), language=_detect_language(content),
+            cover_image=cover_image, source_type=source_type, source_tier=source_tier,
+        )
+
+    return None
+
+
+# ─── Jina Reader API ─────────────────────────────────────────────────────────
+
+def _extract_with_jina(url: str) -> ArticleData | None:
+    """
+    使用 Jina Reader API 提取文章内容。
+    免费、支持 JS 渲染、能突破大多数反爬机制。
+    返回 JSON 格式的结构化数据。
+    """
+    domain = _get_domain(url)
+    source_type, source_tier = _detect_source_info(domain)
+
+    try:
+        resp = requests.get(
+            f"https://r.jina.ai/{url}",
+            headers={
+                "Accept": "application/json",
+                "X-No-Cache": "true",
+            },
+            timeout=JINA_TIMEOUT,
+        )
+        resp.raise_for_status()
+    except Exception:
+        return None
+
+    try:
+        data = resp.json().get("data", {})
+    except (ValueError, AttributeError):
+        return None
+
+    content = str(data.get("content", "")).strip()
     if not content or len(content.split()) < 50:
-        raise ValueError("无法从该页面提取有效文章内容，该页面可能需要登录、依赖 JavaScript 渲染或内容较少")
+        return None
+
+    title = str(data.get("title", "")).strip()
+    published = str(data.get("publishedTime", "")).strip()
+    author = ""
+    cover_image = ""
+
+    if isinstance(data.get("images"), list) and data["images"]:
+        first_img = data["images"][0]
+        if isinstance(first_img, dict):
+            cover_image = first_img.get("src", first_img.get("url", ""))
+        elif isinstance(first_img, str):
+            cover_image = first_img
 
     return ArticleData(
-        url=url, domain=domain, title=title, content=content[:15000],
-        published=published, author=author,
-        word_count=len(content.split()), language=_detect_language(content),
-        cover_image=cover_image, source_type=source_type, source_tier=source_tier,
+        url=url,
+        domain=domain,
+        title=title,
+        content=content[:15000],
+        published=published,
+        author=author,
+        word_count=len(content.split()),
+        language=_detect_language(content),
+        cover_image=cover_image,
+        source_type=source_type,
+        source_tier=source_tier,
+    )
+
+
+# ─── 主入口 ──────────────────────────────────────────────────────────────────
+
+def fetch_article(url: str) -> ArticleData:
+    """
+    从 URL 提取文章，多层降级策略：
+    1. 本地提取（trafilatura → BS4 → NEXT_DATA）
+    2. Jina Reader API（JS 渲染 + 反爬突破）
+    """
+    domain = _get_domain(url)
+
+    # Pass 1: 本地提取
+    result = _try_local_extraction(url)
+    if result and result.word_count >= MIN_WORD_COUNT:
+        return result
+
+    # Pass 2: Jina Reader API
+    jina_result = _extract_with_jina(url)
+    if jina_result and jina_result.word_count >= 50:
+        if result:
+            jina_result.published = jina_result.published or result.published
+            jina_result.author = jina_result.author or result.author
+            jina_result.cover_image = jina_result.cover_image or result.cover_image
+            if result.title and not jina_result.title:
+                jina_result.title = result.title
+        return jina_result
+
+    # Pass 3: 如果本地至少拿到了一些内容，也接受
+    if result and result.word_count >= 50:
+        return result
+
+    # 所有方法都失败了
+    paywall_name = None
+    for pw_domain, pw_name in PAYWALL_HINT.items():
+        if domain == pw_domain or domain.endswith("." + pw_domain):
+            paywall_name = pw_name
+            break
+
+    if paywall_name:
+        raise ValueError(
+            f"{paywall_name} 为付费订阅内容，无法提取完整文章。"
+            f"建议尝试该文章的免费摘要版本或其他来源。"
+        )
+
+    raise ValueError(
+        "无法从该页面提取有效文章内容。"
+        "可能的原因：页面需要登录、依赖特殊 JavaScript 渲染、或内容较少。"
     )

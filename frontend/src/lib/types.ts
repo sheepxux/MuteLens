@@ -5,6 +5,7 @@ export interface DimensionScore {
   score: number;
   maxScore: number;
   description: string;
+  weight: number;
 }
 
 export interface AnalyzeResult {
@@ -21,9 +22,8 @@ export interface AnalyzeResult {
   grade: string;
   vetoed: boolean;
   veto_reason: string;
-  content_type: string;
-  content_type_label: string;
   dimensions: DimensionScore[];
-  intermediate: Record<string, number>;
+  weights: Record<string, number>;
   analysis_summary: string;
+  badge_id: string;
 }

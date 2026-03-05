@@ -1,23 +1,33 @@
 """
-Mutelens - FastAPI Backend
+Mutelens - FastAPI Backend v3.1
 ================================
-提供文章分析 API，接收 URL，返回多维度评分结果。
+基于 LLM 的文章质量多维度评测 API + 认证徽章系统。
+流程: 提取文章 → Veto Gate 预检 → LLM 语义评估 → 加权评分 → 存储 & 返回结果。
 """
 
+import os
 import traceback
-from dataclasses import asdict
 
-from fastapi import FastAPI, HTTPException
+from dotenv import load_dotenv
+load_dotenv()
+
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, HttpUrl
+from fastapi.responses import Response
+from pydantic import BaseModel
 
 from article_fetcher import fetch_article
-from scorer_engine import score_article
+from scorer_engine import veto_gate, compute_score, create_vetoed_result
+from llm_evaluator import evaluate_article
+from badge_store import save_evaluation, get_evaluation
+from badge_svg import generate_badge_svg
+
+SITE_URL = os.getenv("SITE_URL", "http://localhost:3333")
 
 app = FastAPI(
     title="Mutelens API",
-    description="文章质量多维度评测引擎",
-    version="2.0.0",
+    description="基于 LLM 的文章质量多维度评测引擎 + 认证徽章系统",
+    version="3.1.0",
 )
 
 app.add_middleware(
@@ -47,36 +57,31 @@ class AnalyzeResponse(BaseModel):
     grade: str
     vetoed: bool
     veto_reason: str
-    content_type: str
-    content_type_label: str
     dimensions: list[dict]
-    intermediate: dict[str, float]
+    weights: dict[str, float]
     analysis_summary: str
+    badge_id: str
 
 
 @app.get("/api/health")
 async def health_check():
-    return {"status": "ok", "service": "Mutelens"}
+    return {"status": "ok", "service": "Mutelens", "version": "3.1"}
 
 
 @app.post("/api/analyze", response_model=AnalyzeResponse)
-async def analyze_article(req: AnalyzeRequest):
-    """分析文章 URL，返回多维度评分。"""
+async def analyze_article_endpoint(req: AnalyzeRequest):
+    """分析文章 URL，返回基于 LLM 的多维度评分 + 认证徽章 ID。"""
     url = req.url.strip()
     if not url:
         raise HTTPException(status_code=400, detail="URL 不能为空")
 
-    # 1. 提取文章
     try:
         article = fetch_article(url)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         traceback.print_exc()
-        raise HTTPException(
-            status_code=500,
-            detail=f"文章提取失败: {str(e)}",
-        )
+        raise HTTPException(status_code=500, detail=f"文章提取失败: {str(e)}")
 
     if not article.content or len(article.content.strip()) < 30:
         raise HTTPException(
@@ -84,24 +89,26 @@ async def analyze_article(req: AnalyzeRequest):
             detail="无法提取有效文章内容，请检查 URL 是否正确",
         )
 
-    # 2. 评分
-    try:
-        result = score_article(
-            title=article.title,
-            content=article.content,
-            domain=article.domain,
-            published=article.published,
-            source_type=article.source_type,
-            source_tier=article.source_tier,
-        )
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=500,
-            detail=f"评分引擎错误: {str(e)}",
-        )
+    vetoed, veto_reason = veto_gate(article.title, article.content)
+    if vetoed:
+        result = create_vetoed_result(veto_reason)
+    else:
+        try:
+            llm_eval = await evaluate_article(
+                title=article.title,
+                content=article.content,
+                domain=article.domain,
+            )
+            result = compute_score(llm_eval)
+        except ValueError as e:
+            raise HTTPException(status_code=503, detail=str(e))
+        except Exception as e:
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=500,
+                detail=f"LLM 评估失败: {str(e)}。请检查 API 配置或稍后重试。",
+            )
 
-    # 3. 构造响应
     content_preview = article.content[:500] + ("..." if len(article.content) > 500 else "")
 
     dimensions_list = [
@@ -112,9 +119,29 @@ async def analyze_article(req: AnalyzeRequest):
             "score": d.score,
             "maxScore": d.max_score,
             "description": d.description,
+            "weight": d.weight,
         }
         for d in result.dimensions
     ]
+
+    badge_id = save_evaluation(
+        url=article.url,
+        domain=article.domain,
+        title=article.title,
+        author=article.author,
+        published=article.published,
+        cover_image=article.cover_image,
+        word_count=article.word_count,
+        language=article.language,
+        content_preview=content_preview,
+        overall_score=result.overall_score,
+        grade=result.grade,
+        vetoed=result.vetoed,
+        veto_reason=result.veto_reason,
+        dimensions=dimensions_list,
+        weights=result.weights,
+        analysis_summary=result.analysis_summary,
+    )
 
     return AnalyzeResponse(
         url=article.url,
@@ -130,12 +157,70 @@ async def analyze_article(req: AnalyzeRequest):
         grade=result.grade,
         vetoed=result.vetoed,
         veto_reason=result.veto_reason,
-        content_type=result.content_type,
-        content_type_label=result.content_type_label,
         dimensions=dimensions_list,
-        intermediate=result.intermediate,
+        weights=result.weights,
         analysis_summary=result.analysis_summary,
+        badge_id=badge_id,
     )
+
+
+# ─── Badge Endpoints ──────────────────────────────────────────────────────────
+
+@app.get("/api/badge/{badge_id}")
+async def get_badge_svg(
+    badge_id: str,
+    style: str = Query("flat", regex="^(flat|seal)$"),
+):
+    """Return an SVG certification badge image."""
+    evaluation = get_evaluation(badge_id)
+    if not evaluation:
+        raise HTTPException(status_code=404, detail="Badge not found")
+
+    svg = generate_badge_svg(
+        score=evaluation.overall_score,
+        grade=evaluation.grade,
+        title=evaluation.title,
+        style=style,
+    )
+
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={
+            "Cache-Control": "public, max-age=86400",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
+@app.get("/api/verify/{badge_id}")
+async def verify_badge(badge_id: str):
+    """Return full evaluation data for verification."""
+    evaluation = get_evaluation(badge_id)
+    if not evaluation:
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+
+    return {
+        "badge_id": evaluation.badge_id,
+        "url": evaluation.url,
+        "domain": evaluation.domain,
+        "title": evaluation.title,
+        "author": evaluation.author,
+        "published": evaluation.published,
+        "cover_image": evaluation.cover_image,
+        "word_count": evaluation.word_count,
+        "language": evaluation.language,
+        "overall_score": evaluation.overall_score,
+        "grade": evaluation.grade,
+        "vetoed": evaluation.vetoed,
+        "veto_reason": evaluation.veto_reason,
+        "dimensions": evaluation.dimensions,
+        "weights": evaluation.weights,
+        "analysis_summary": evaluation.analysis_summary,
+        "created_at": evaluation.created_at,
+        "badge_url": f"{SITE_URL}/api/badge/{evaluation.badge_id}",
+        "verify_url": f"{SITE_URL}/verify/{evaluation.badge_id}",
+    }
 
 
 if __name__ == "__main__":

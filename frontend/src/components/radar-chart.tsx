@@ -11,29 +11,29 @@ import {
   Tooltip,
 } from "recharts";
 import { DimensionScore } from "@/lib/types";
+import { useLocale } from "@/lib/i18n/context";
 
 interface RadarChartViewProps {
   dimensions: DimensionScore[];
 }
 
 export default function RadarChartView({ dimensions }: RadarChartViewProps) {
+  const { locale } = useLocale();
+
   const data = dimensions.map((d) => ({
-    subject: d.label,
+    subject: locale === "en" ? d.labelEn : d.label,
     score: d.score,
     fullMark: 10,
   }));
 
   return (
     <div className="glass-panel rounded-2xl p-6">
-      <h3 className="text-sm font-medium text-white/50 mb-4">
-        维度雷达图
-      </h3>
-      <div className="w-full h-[320px]">
+      <div className="w-full h-[340px]">
         <ResponsiveContainer width="100%" height="100%">
           <RadarChart
             cx="50%"
             cy="50%"
-            outerRadius="70%"
+            outerRadius="75%"
             data={data}
           >
             <PolarGrid
@@ -44,7 +44,7 @@ export default function RadarChartView({ dimensions }: RadarChartViewProps) {
               dataKey="subject"
               tick={{
                 fill: "rgba(255,255,255,0.5)",
-                fontSize: 11,
+                fontSize: 12,
               }}
             />
             <PolarRadiusAxis
@@ -54,14 +54,14 @@ export default function RadarChartView({ dimensions }: RadarChartViewProps) {
               axisLine={false}
             />
             <Radar
-              name="评分"
+              name="Score"
               dataKey="score"
               stroke="#fc6011"
               fill="#fc6011"
               fillOpacity={0.2}
               strokeWidth={2}
               dot={{
-                r: 3,
+                r: 4,
                 fill: "#fc6011",
                 stroke: "#fc6011",
               }}
@@ -76,7 +76,7 @@ export default function RadarChartView({ dimensions }: RadarChartViewProps) {
               }}
               formatter={(value: number | undefined) => [
                 `${(value ?? 0).toFixed(1)} / 10`,
-                "分数",
+                locale === "en" ? "Score" : "分数",
               ]}
             />
           </RadarChart>

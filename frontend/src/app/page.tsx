@@ -3,20 +3,57 @@
 import React from "react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
-import { BarChart3, ShieldAlert, FlaskConical, Github } from "lucide-react";
+import { Brain, ShieldAlert, Telescope, Github } from "lucide-react";
 import UrlInput from "@/components/url-input";
 import LoadingAnimation from "@/components/loading-animation";
 import ScoreDashboard from "@/components/score-dashboard";
 import { useArticleScore } from "@/hooks/use-article-score";
 import PlatformLogoLoop from "@/components/platform-logo-loop";
+import { useLocale } from "@/lib/i18n/context";
 
 const ShaderBackground = dynamic(
   () => import("@/components/shader-background"),
   { ssr: false }
 );
 
+function LanguageToggle() {
+  const { locale, setLocale } = useLocale();
+  return (
+    <div className="flex items-center rounded-lg border border-white/10 overflow-hidden text-[11px] font-mono">
+      <button
+        onClick={() => setLocale("en")}
+        className={`px-2.5 py-1 transition-colors duration-150 ${
+          locale === "en"
+            ? "bg-white/10 text-white/80"
+            : "text-white/30 hover:text-white/50"
+        }`}
+      >
+        EN
+      </button>
+      <div className="w-px h-3 bg-white/10" />
+      <button
+        onClick={() => setLocale("zh")}
+        className={`px-2.5 py-1 transition-colors duration-150 ${
+          locale === "zh"
+            ? "bg-white/10 text-white/80"
+            : "text-white/30 hover:text-white/50"
+        }`}
+      >
+        中
+      </button>
+    </div>
+  );
+}
+
 export default function Home() {
   const { result, loading, error, analyze, reset } = useArticleScore();
+  const { t } = useLocale();
+
+  const featureCards = [
+    { titleKey: "feature.llm.title" as const, descKey: "feature.llm.desc" as const, Icon: Brain },
+    { titleKey: "feature.gate.title" as const, descKey: "feature.gate.desc" as const, Icon: ShieldAlert },
+    { titleKey: "feature.forward.title" as const, descKey: "feature.forward.desc" as const, Icon: Telescope },
+  ];
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -26,11 +63,11 @@ export default function Home() {
         <header className="glass-bar rounded-2xl border pointer-events-auto w-full max-w-3xl" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
           <div className="px-6 h-12 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <Image src="/mutelens.svg" alt="Mutelens" width={22} height={22} className="rounded-md" />
+              <Image src="/mutelens.svg" alt="MuteLens" width={22} height={22} className="rounded-md" />
               <span className="text-[14px] font-semibold text-white tracking-tight">MuteLens</span>
             </div>
             <div className="flex items-center gap-3">
-              <span className="tag-pill">v2.0.3</span>
+              <LanguageToggle />
               <div className="w-px h-4 bg-white/10" />
               <a
                 href="https://github.com/sheepxux/Mutelens"
@@ -53,34 +90,30 @@ export default function Home() {
             <div className="flex justify-center mb-8">
               <span className="tag-pill">
                 <span className="w-1.5 h-1.5 rounded-full bg-[#fc6011]" style={{ animation: "glow-pulse 2s ease-in-out infinite" }} />
-                AI 多维度分析引擎
+                {t("header.tagPill")}
               </span>
             </div>
 
             <h2 className="text-center text-4xl font-bold text-white leading-tight tracking-tight mb-4">
-              消除信息噪音，<br />
-              <span style={{ color: "#fc6011" }}>看清文章质量</span>
+              {t("hero.title.line1")}<br />
+              <span style={{ color: "#fc6011" }}>{t("hero.title.line2")}</span>
             </h2>
-            <p className="text-center text-[15px] text-white/40 max-w-sm mx-auto leading-relaxed mb-10">
-              粘贴任意文章链接，从 10 个维度深度评测，生成客观的质量评分报告。
+            <p className="text-center text-[15px] text-white/40 max-w-md mx-auto leading-relaxed mb-10">
+              {t("hero.subtitle")}
             </p>
 
             <UrlInput onSubmit={analyze} loading={loading} onReset={reset} hasResult={!!result} />
 
             <div className="divider my-8" />
-            <div className="grid grid-cols-3 gap-3">
-              {[
-                { title: "10 维度评分", desc: "事实密度、信源质量、内容深度、情绪中立度", Icon: BarChart3 },
-                { title: "Veto Gate",   desc: "自动识别标题党、广告软文、极端情绪内容",   Icon: ShieldAlert },
-                { title: "公式透明",    desc: "Sigmoid 归一化，动态权重，全程可追溯",     Icon: FlaskConical },
-              ].map((item) => (
-                <div key={item.title} className="glass-card rounded-2xl p-4 flex flex-col gap-2.5 hover:border-[#fc6011]/20 transition-colors duration-200">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {featureCards.map((item) => (
+                <div key={item.titleKey} className="glass-card rounded-2xl p-4 flex sm:flex-col gap-3 sm:gap-2.5 hover:border-[#fc6011]/20 transition-colors duration-200">
                   <div className="w-8 h-8 rounded-xl glass-accent flex items-center justify-center flex-shrink-0">
                     <item.Icon size={15} className="text-[#fc6011]" />
                   </div>
-                  <div>
-                    <p className="text-[13px] font-medium text-white mb-0.5">{item.title}</p>
-                    <p className="text-[11px] text-white/35 leading-relaxed">{item.desc}</p>
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-semibold text-white mb-1">{t(item.titleKey)}</p>
+                    <p className="text-[11px] text-white/35 leading-[1.6]">{t(item.descKey)}</p>
                   </div>
                 </div>
               ))}
@@ -112,7 +145,7 @@ export default function Home() {
                 <span className="text-red-400 text-xs font-bold">!</span>
               </div>
               <div>
-                <p className="text-sm font-medium text-red-400 mb-0.5">分析失败</p>
+                <p className="text-sm font-medium text-red-400 mb-0.5">{t("error.title")}</p>
                 <p className="text-xs text-red-400/70">{error}</p>
               </div>
             </div>
@@ -136,10 +169,10 @@ export default function Home() {
       <footer className="glass-bar border-t">
         <div className="max-w-4xl mx-auto px-6 h-12 flex items-center justify-between">
           <p className="text-[11px] text-white/20 font-mono">
-            MuteLens v2.0.3 · 基于多维度评分引擎
+            {t("footer.tagline")}
           </p>
           <p className="text-[11px] text-white/25 font-mono">
-            由{" "}
+            {t("footer.credit.prefix")}{" "}
             <a
               href="https://github.com/sheepxux"
               target="_blank"
@@ -148,7 +181,7 @@ export default function Home() {
             >
               @Sheepxux
             </a>
-            {" "}设计开发
+            {t("footer.credit.suffix") ? ` ${t("footer.credit.suffix")}` : ""}
           </p>
         </div>
       </footer>

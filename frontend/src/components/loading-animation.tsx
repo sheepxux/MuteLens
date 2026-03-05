@@ -1,22 +1,25 @@
 "use client";
 
 import React from "react";
+import { useLocale } from "@/lib/i18n/context";
+import type { TranslationKey } from "@/lib/i18n/zh";
 
-const STEPS = [
-  "正在获取文章内容...",
-  "解析文章结构与元数据...",
-  "计算事实密度与信源质量...",
-  "评估内容新颖性与深度...",
-  "检测标题一致性与情绪...",
-  "生成综合评分报告...",
+const STEP_KEYS: TranslationKey[] = [
+  "loading.step1",
+  "loading.step2",
+  "loading.step3",
+  "loading.step4",
+  "loading.step5",
+  "loading.step6",
 ];
 
 export default function LoadingAnimation() {
   const [step, setStep] = React.useState(0);
+  const { t } = useLocale();
 
   React.useEffect(() => {
     const interval = setInterval(() => {
-      setStep((prev) => (prev + 1) % STEPS.length);
+      setStep((prev) => (prev + 1) % STEP_KEYS.length);
     }, 2000);
     return () => clearInterval(interval);
   }, []);
@@ -34,17 +37,17 @@ export default function LoadingAnimation() {
       </div>
 
       <p key={step} className="text-[13px] text-white/50 animate-fade-in mb-6 text-center font-mono">
-        {STEPS[step]}
+        {t(STEP_KEYS[step])}
       </p>
 
       <div className="w-48 h-[2px] rounded-full bg-white/5 overflow-hidden">
         <div
           className="h-full rounded-full bg-[#fc6011] transition-all duration-700 ease-out"
-          style={{ width: `${((step + 1) / STEPS.length) * 100}%`, boxShadow: "0 0 8px rgba(252,96,17,0.6)" }}
+          style={{ width: `${((step + 1) / STEP_KEYS.length) * 100}%`, boxShadow: "0 0 8px rgba(252,96,17,0.6)" }}
         />
       </div>
       <p className="text-[11px] text-white/15 font-mono mt-2">
-        {step + 1} / {STEPS.length}
+        {step + 1} / {STEP_KEYS.length}
       </p>
     </div>
   );

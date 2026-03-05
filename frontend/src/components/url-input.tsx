@@ -2,6 +2,7 @@
 
 import React, { useCallback, useState } from "react";
 import { Search, Link2, ArrowRight, X } from "lucide-react";
+import { useLocale } from "@/lib/i18n/context";
 
 interface UrlInputProps {
   onSubmit: (url: string) => void;
@@ -18,6 +19,7 @@ export default function UrlInput({
 }: UrlInputProps) {
   const [url, setUrl] = useState("");
   const [focused, setFocused] = useState(false);
+  const { t } = useLocale();
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
@@ -56,7 +58,7 @@ export default function UrlInput({
           onChange={(e) => setUrl(e.target.value)}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          placeholder="粘贴文章链接，开始分析..."
+          placeholder={t("input.placeholder")}
           disabled={loading}
           className="flex-1 bg-transparent px-3 h-full text-[14px] text-white placeholder:text-white/25 outline-none disabled:opacity-40"
         />
@@ -66,6 +68,7 @@ export default function UrlInput({
             type="button"
             onClick={() => setUrl("")}
             className="p-2 mr-1 text-white/20 hover:text-white/50 transition-colors rounded-lg"
+            title="Clear"
           >
             <X size={14} />
           </button>
@@ -89,7 +92,7 @@ export default function UrlInput({
           ) : (
             <>
               <Search size={14} strokeWidth={2} />
-              分析
+              {t("input.analyze")}
             </>
           )}
         </button>
@@ -103,7 +106,7 @@ export default function UrlInput({
             className="flex items-center gap-1.5 text-[12px] text-white/25 hover:text-[#fc6011] transition-colors duration-150"
           >
             <ArrowRight size={11} />
-            分析新文章
+            {t("input.newArticle")}
           </button>
         </div>
       )}

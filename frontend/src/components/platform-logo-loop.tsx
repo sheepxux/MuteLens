@@ -16,6 +16,7 @@ import {
   SiDeepmind,
   SiGooglescholar,
 } from "react-icons/si";
+import { useLocale } from "@/lib/i18n/context";
 
 const LogoLoop = dynamic(() => import("./LogoLoop"), { ssr: false });
 
@@ -36,10 +37,12 @@ const PLATFORMS = [
 ];
 
 export default function PlatformLogoLoop() {
+  const { t } = useLocale();
+
   return (
     <div className="w-full py-4">
       <p className="text-center text-[10px] font-mono text-white/15 uppercase tracking-widest mb-5">
-        支持分析来源
+        {t("platforms.title")}
       </p>
       <div style={{ height: "32px", position: "relative", overflow: "hidden" }}>
         <LogoLoop
@@ -52,7 +55,7 @@ export default function PlatformLogoLoop() {
           fadeOut
           fadeOutColor="#000000"
           scaleOnHover
-          ariaLabel="支持分析的文章来源平台"
+          ariaLabel="Supported article sources"
           style={{ color: "rgba(255,255,255,0.25)" }}
         />
       </div>
